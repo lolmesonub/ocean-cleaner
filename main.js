@@ -1,17 +1,9 @@
-import './style.css'
-
-
-import * as THREE from 'three';
-
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Water } from 'three/examples/jsm/objects/Water.js';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-
 let camera, scene, renderer;
 let controls, water, sun;
+let boat, trashes = [];
 
-const loader = new GLTFLoader();
+const loader = new THREE.GLTFLoader();
+const TRASH_COUNT = 10;
 
 function random(min, max) {
   return Math.random() * (max - min) + min;
@@ -19,223 +11,174 @@ function random(min, max) {
 
 class Boat {
   constructor(){
-    loader.load("assets/boat/scene.gltf", (gltf) => {
-      scene.add( gltf.scene )
-      gltf.scene.scale.set(3, 3, 3)
-      gltf.scene.position.set(5,13,50)
-      gltf.scene.rotation.y = 1.5
+    this.boat = null;
+    this.speed = { vel: 0, rot: 0 };
 
-      this.boat = gltf.scene
-      this.speed = {
-        vel: 0,
-        rot: 0
-      }
-    })
+    loader.load("assets/boat/scene.gltf", (gltf) => {
+      this.boat = gltf.scene;
+      this.boat.scale.set(3, 3, 3);
+      this.boat.position.set(5, 13, 50);
+      this.boat.rotation.y = 1.5;
+      scene.add(this.boat);
+    });
   }
 
   stop(){
-    this.speed.vel = 0
-    this.speed.rot = 0
+    this.speed.vel = 0;
+    this.speed.rot = 0;
   }
 
   update(){
-    if(this.boat){
-      this.boat.rotation.y += this.speed.rot
-      this.boat.translateX(this.speed.vel)
+    if (this.boat) {
+      this.boat.rotation.y += this.speed.rot;
+      this.boat.translateX(this.speed.vel);
     }
   }
 }
 
-const boat = new Boat()
-
-
-class Trash{
+class Trash {
   constructor(_scene){
-    scene.add( _scene )
-    _scene.scale.set(1.5, 1.5, 1.5)
-    if(Math.random() > .6){
-      _scene.position.set(random(-100, 100), -.5, random(-100, 100))
-    }else{
-      _scene.position.set(random(-500, 500), -.5, random(-1000, 1000))
-    }
-
-    this.trash = _scene
+    this.trash = _scene;
+    scene.add(this.trash);
+    this.trash.scale.set(1.5, 1.5, 1.5);
+    this.trash.position.set(
+      Math.random() > 0.6 ? random(-100, 100) : random(-500, 500),
+      -0.5,
+      Math.random() > 0.6 ? random(-100, 100) : random(-1000, 1000)
+    );
   }
 }
 
 async function loadModel(url){
   return new Promise((resolve, reject) => {
     loader.load(url, (gltf) => {
-      resolve(gltf.scene)
-    })
-  })
+      resolve(gltf.scene);
+    }, undefined, reject);
+  });
 }
 
-let boatModel = null
 async function createTrash(){
-  if(!boatModel){
-    boatModel = await loadModel("assets/trash/scene.gltf")
-  }
-  return new Trash(boatModel.clone())
+  const trashModel = await loadModel("assets/trash/scene.gltf");
+  return new Trash(trashModel.clone());
 }
-
-let trashes = []
-const TRASH_COUNT = 500
 
 init();
 animate();
 
 async function init() {
   renderer = new THREE.WebGLRenderer();
-  renderer.setPixelRatio( window.devicePixelRatio );
-  renderer.setSize( window.innerWidth, window.innerHeight );
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  document.body.appendChild( renderer.domElement );
+  document.body.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
 
-  camera = new THREE.PerspectiveCamera( 55, window.innerWidth / window.innerHeight, 1, 20000 );
-  camera.position.set( 30, 30, 100 );
+  camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 20000);
+  camera.position.set(30, 30, 100);
 
   sun = new THREE.Vector3();
 
-  // Water
+  const waterGeometry = new THREE.PlaneGeometry(10000, 10000);
+  water = new THREE.Water(waterGeometry, {
+    textureWidth: 512,
+    textureHeight: 512,
+    waterNormals: new THREE.TextureLoader().load('assets/waternormals.jpg', (texture) => {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    }),
+    sunDirection: new THREE.Vector3(),
+    sunColor: 0xffffff,
+    waterColor: 0x001e0f,
+    distortionScale: 3.7,
+    fog: scene.fog !== undefined
+  });
 
-  const waterGeometry = new THREE.PlaneGeometry( 10000, 10000 );
+  water.rotation.x = -Math.PI / 2;
+  scene.add(water);
 
-  water = new Water(
-    waterGeometry,
-    {
-      textureWidth: 512,
-      textureHeight: 512,
-      waterNormals: new THREE.TextureLoader().load( 'assets/waternormals.jpg', function ( texture ) {
-
-        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-
-      } ),
-      sunDirection: new THREE.Vector3(),
-      sunColor: 0xffffff,
-      waterColor: 0x001e0f,
-      distortionScale: 3.7,
-      fog: scene.fog !== undefined
-    }
-  );
-
-  water.rotation.x = - Math.PI / 2;
-
-  scene.add( water );
-
-  // Skybox
-
-  const sky = new Sky();
-  sky.scale.setScalar( 10000 );
-  scene.add( sky );
+  const sky = new THREE.Sky();
+  sky.scale.setScalar(10000);
+  scene.add(sky);
 
   const skyUniforms = sky.material.uniforms;
+  skyUniforms.turbidity.value = 10;
+  skyUniforms.rayleigh.value = 2;
+  skyUniforms.mieCoefficient.value = 0.005;
+  skyUniforms.mieDirectionalG.value = 0.8;
 
-  skyUniforms[ 'turbidity' ].value = 10;
-  skyUniforms[ 'rayleigh' ].value = 2;
-  skyUniforms[ 'mieCoefficient' ].value = 0.005;
-  skyUniforms[ 'mieDirectionalG' ].value = 0.8;
-
-  const parameters = {
-    elevation: 2,
-    azimuth: 180
-  };
-
-  const pmremGenerator = new THREE.PMREMGenerator( renderer );
+  const parameters = { elevation: 2, azimuth: 180 };
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
 
   function updateSun() {
-
-    const phi = THREE.MathUtils.degToRad( 90 - parameters.elevation );
-    const theta = THREE.MathUtils.degToRad( parameters.azimuth );
-
-    sun.setFromSphericalCoords( 1, phi, theta );
-
-    sky.material.uniforms[ 'sunPosition' ].value.copy( sun );
-    water.material.uniforms[ 'sunDirection' ].value.copy( sun ).normalize();
-
-    scene.environment = pmremGenerator.fromScene( sky ).texture;
-
+    const phi = THREE.MathUtils.degToRad(90 - parameters.elevation);
+    const theta = THREE.MathUtils.degToRad(parameters.azimuth);
+    sun.setFromSphericalCoords(1, phi, theta);
+    sky.material.uniforms.sunPosition.value.copy(sun);
+    water.material.uniforms.sunDirection.value.copy(sun).normalize();
+    scene.environment = pmremGenerator.fromScene(sky).texture;
   }
 
   updateSun();
 
-  controls = new OrbitControls( camera, renderer.domElement );
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.maxPolarAngle = Math.PI * 0.495;
-  controls.target.set( 0, 10, 0 );
+  controls.target.set(0, 10, 0);
   controls.minDistance = 40.0;
   controls.maxDistance = 200.0;
   controls.update();
 
-  const waterUniforms = water.material.uniforms;
+  boat = new Boat();
 
-  for(let i = 0; i < TRASH_COUNT; i++){
-    const trash = await createTrash()
-    trashes.push(trash)
+  for (let i = 0; i < TRASH_COUNT; i++) {
+    const trash = await createTrash();
+    trashes.push(trash);
   }
 
-  window.addEventListener( 'resize', onWindowResize );
+  window.addEventListener('resize', onWindowResize);
 
-  window.addEventListener( 'keydown', function(e){
-    if(e.key == "ArrowUp"){
-      boat.speed.vel = 1
-    }
-    if(e.key == "ArrowDown"){
-      boat.speed.vel = -1
-    }
-    if(e.key == "ArrowRight"){
-      boat.speed.rot = -0.1
-    }
-    if(e.key == "ArrowLeft"){
-      boat.speed.rot = 0.1
-    }
-  })
-  window.addEventListener( 'keyup', function(e){
-    boat.stop()
-  })
+  window.addEventListener('keydown', (e) => {
+    if (e.key === "ArrowUp") boat.speed.vel = 1;
+    if (e.key === "ArrowDown") boat.speed.vel = -1;
+    if (e.key === "ArrowRight") boat.speed.rot = -0.1;
+    if (e.key === "ArrowLeft") boat.speed.rot = 0.1;
+  });
 
+  window.addEventListener('keyup', (e) => {
+    boat.stop();
+  });
 }
 
 function onWindowResize() {
-
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-
-  renderer.setSize( window.innerWidth, window.innerHeight );
-
+  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function isColliding(obj1, obj2){
   return (
     Math.abs(obj1.position.x - obj2.position.x) < 15 &&
     Math.abs(obj1.position.z - obj2.position.z) < 15
-  )
+  );
 }
 
 function checkCollisions(){
-  if(boat.boat){
+  if (boat && boat.boat) {
     trashes.forEach(trash => {
-      console.log("hello")
-      if(trash.trash){
-        if(isColliding(boat.boat, trash.trash)){
-          scene.remove(trash.trash)
-        }
+      if (trash.trash && isColliding(boat.boat, trash.trash)) {
+        scene.remove(trash.trash);
       }
-    })
+    });
   }
 }
 
 function animate() {
-  requestAnimationFrame( animate );
+  requestAnimationFrame(animate);
   render();
-  boat.update()
-  checkCollisions()
+  boat.update();
+  checkCollisions();
 }
 
 function render() {
-  water.material.uniforms[ 'time' ].value += 1.0 / 60.0;
-
-  renderer.render( scene, camera );
-
+  water.material.uniforms.time.value += 1.0 / 60.0;
+  renderer.render(scene, camera);
 }
